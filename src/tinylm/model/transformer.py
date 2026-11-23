@@ -75,11 +75,17 @@ class TransformerLM(nn.Module):
         self.num_layers = num_layers
         self.embedding = Embedding(vocab_size, self.d_model)
         self.blocks = nn.ModuleList()
-        self.device = device
         for _ in range(num_layers):
             self.blocks.append(TransformerBlock(d_model, num_heads, d_ff, rope))
         self.rmsnorm = RMSNorm(d_model)
         self.final_linear = Linear(d_model, vocab_size)
+
+        # Submodules are created on the default device; move them so that the
+        # ``device`` argument is honored end to end (the original assignment code
+        # relied on an external ``model.to(device)`` call instead).
+        if device is not None:
+            self.to(device)
+        self.device = device
 
     def forward(self, in_indices: torch.Tensor) -> torch.Tensor:
         # (batch, sequence_length, d_model)

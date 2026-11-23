@@ -96,6 +96,33 @@ uv run ruff check src scripts tests
 
 `make test` and `make lint` wrap the same commands.
 
+## Training results
+
+A 22.7M-parameter model (512 d_model, 16 heads, 4 layers) trained on TinyStories
+reaches **val loss 1.375 (PPL 3.96)** after 40k steps on a single A800. Full
+sweeps, ablation tables, and figures are in [docs/RESULTS.md](docs/RESULTS.md).
+
+| Experiment | Config | Val loss | PPL |
+| --- | --- | ---: | ---: |
+| Baseline | lr 1e-3, batch 32, 40k steps | **1.375** | **3.96** |
+| LR sweep | best lr 1e-3 | 1.378 | 3.97 |
+| Ablation | post-norm / SiLU / no-RoPE | 1.38–1.43 | 3.97–4.18 |
+| OpenWebText | 32k vocab, baseline | 3.939 | 51.36 |
+
+Sample continuation from `checkpoint40000` (`temperature=0.8, top_p=0.9`):
+
+> Once upon a time, there was a little girl named Lily. She loved to eat apples.
+> One day, she went to the park with her mom. They saw a big tree with lots of
+> apples.
+
+![Training loss curve](docs/figures/main_loss_curve.png)
+
+Reproduce the run summary from any directory of `metrics.csv` files:
+
+```sh
+uv run python scripts/summarize_runs.py --runs-dir runs
+```
+
 ## Measured results (tokenizer)
 
 From the original experiment notes in [docs/cs336-notes.txt](docs/cs336-notes.txt):
