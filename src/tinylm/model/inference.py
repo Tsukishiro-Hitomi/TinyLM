@@ -1,48 +1,95 @@
-"""Autoregressive inference helpers."""
+"""Autoregressive text generation with KV-cache support."""
+
+from __future__ import annotations
 
 import torch
 
-from .attention import softmax
-from .transformer import TransformerLM
 from ..tokenization.tokenizer import Tokenizer
+from .transformer import TransformerLM
 
-def predict(logits: torch.Tensor, top_p = .0) -> torch.Tensor:
-    # logits: (1, L, D)
 
-    if top_p == .0:
-        # sample the max probability
-        return logits[:, -1].argmax(dim=-1, keepdim=True)
+def sample_next_token(
+    logits: torch.Tensor,
+    temperature: float = 1.0,
+    top_k: int | None = None,
+    top_p: float | None = None,
+) -> torch.Tensor:
+    """Sample one token per batch row from ``logits`` of shape ``(batch, vocab)``.
 
-    # top-p sampling
-    temperature = 0.001
-    scaled_logits = logits[:, -1] / temperature
-    probs = softmax(scaled_logits, -1)
-    sorted_probs, sorted_idx = torch.sort(probs, descending=True)
-    keep = torch.cumsum(sorted_probs, dim=-1) <= top_p
-    keep[..., 0] = True
+    ``temperature <= 0`` performs greedy decoding.
+    """
+    if temperature is None or temperature <= 0:
+        return logits.argmax(dim=-1, keepdim=True)
 
-    filtered = torch.zeros_like(probs)
-    filtered.scatter_(-1, sorted_idx, sorted_probs * keep)
-    filtered = filtered / filtered.sum(dim=-1, keepdim=True)
+    logits = logits / temperature
 
-    token = torch.multinomial(filtered, num_samples=1)
+    if top_k is not None and top_k > 0:
+        k = min(int(top_k), logits.size(-1))
+        threshold = torch.topk(logits, k, dim=-1).values[..., -1, None]
+        logits = logits.masked_fill(logits < threshold, float("-inf"))
 
-    return token
+    if top_p is not None and 0.0 < top_p < 1.0:
+        sorted_logits, sorted_index = torch.sort(logits, descending=True, dim=-1)
+        probs = torch.softmax(sorted_logits, dim=-1)
+        cumulative = torch.cumsum(probs, dim=-1)
+        drop = cumulative - probs >= top_p
+        sorted_logits = sorted_logits.masked_fill(drop, float("-inf"))
+        logits = torch.full_like(logits, float("-inf")).scatter(-1, sorted_index, sorted_logits)
 
-def infer(prompt: torch.Tensor,
-          model: TransformerLM,
-          tokenizer: Tokenizer,
-          top_p = .0,
-          special_token = "<|endoftext|>",
-          max_length = 1000
-          ):
-    special_token_id = tokenizer.encode(special_token)[0]
-    for _ in range(max_length):
-        logits = model(prompt)
-        next_token_idx = predict(logits, top_p)
-        prompt = torch.cat([prompt, next_token_idx.reshape((1, 1))], dim=1)
+    probs = torch.softmax(logits, dim=-1)
+    return torch.multinomial(probs, num_samples=1)
 
-        if next_token_idx.item() == special_token_id:
-            break
 
-    return prompt
+@torch.no_grad()
+def generate(
+    model: TransformerLM,
+    tokenizer: Tokenizer,
+    prompt: str,
+    max_new_tokens: int = 100,
+    temperature: float = 1.0,
+    top_k: int | None = None,
+    top_p: float | None = None,
+    eos_token: str | None = "<|endoftext|>",
+    device: torch.device | str | None = None,
+    use_cache: bool = True,
+) -> str:
+    """Generate a continuation of ``prompt``.
+
+    With ``use_cache=True`` the prompt is prefilled once and every new token is
+    decoded against the cached keys/values in O(L) rather than recomputing the
+    full prefix. The output is identical to the no-cache path for greedy decoding.
+    """
+    device = torch.device(device) if device is not None else next(model.parameters()).device
+    eos_id = tokenizer.encode(eos_token)[0] if eos_token else None
+
+    prompt_ids = tokenizer.encode(prompt)
+    if not prompt_ids:
+        prompt_ids = [eos_id] if eos_id is not None else [0]
+    generated: list[int] = []
+
+    if use_cache:
+        input_ids = torch.tensor([prompt_ids], dtype=torch.long, device=device)
+        logits, cache = model.forward_cached(input_ids, past_kv=None, start_pos=0)
+        position = len(prompt_ids)
+        for step in range(max_new_tokens):
+            next_token = sample_next_token(logits[:, -1, :], temperature, top_k, top_p).item()
+            generated.append(next_token)
+            if eos_id is not None and next_token == eos_id:
+                break
+            if step == max_new_tokens - 1:
+                break
+            step_input = torch.tensor([[next_token]], dtype=torch.long, device=device)
+            logits, cache = model.forward_cached(step_input, past_kv=cache, start_pos=position)
+            position += 1
+    else:
+        ids = list(prompt_ids)
+        for _ in range(max_new_tokens):
+            input_ids = torch.tensor([ids], dtype=torch.long, device=device)
+            logits = model(input_ids)
+            next_token = sample_next_token(logits[:, -1, :], temperature, top_k, top_p).item()
+            generated.append(next_token)
+            ids.append(next_token)
+            if eos_id is not None and next_token == eos_id:
+                break
+
+    return tokenizer.decode(prompt_ids + generated)

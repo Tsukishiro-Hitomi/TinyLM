@@ -20,15 +20,18 @@ The code was originally developed while working through Stanford CS336
 - **Training utilities** — AdamW, SGD, cosine learning-rate schedule with
   warmup, gradient clipping, checkpoint save/load, CSV metric logging, and loss
   plots.
-- **Inference** — top-p / temperature sampling and autoregressive generation
-  from a checkpoint.
+- **Inference** — KV-cache incremental decoding, Flash Attention via
+  `F.scaled_dot_product_attention` (with a manual fallback for parity tests),
+  and temperature / top-k / top-p sampling.
+- **Evaluation** — tokenizer-independent bits-per-byte (BPB), generation
+  diversity (distinct-n and repetition), and an inference benchmark.
 - **Typed configuration** — `ModelConfig`, `TrainConfig`, and `TokenizerConfig`
   dataclasses replace scattered magic numbers.
-- **Tested and linted** — `pytest` and `ruff` are clean, and CI runs both.
+- **Tested and linted** — 49 tests pass and `ruff` is clean; CI runs both.
 
-Only limited-memory components are exercised here; no trained-model quality or
-perplexity result is claimed. The included smoke config is a bounded check, not
-a performance recipe.
+Results for the 22.7M-parameter model on TinyStories: **val loss 1.375, PPL 3.96,
+BPB 0.4996**, with full learning-rate / batch-size / ablation sweeps in
+[docs/RESULTS.md](docs/RESULTS.md).
 
 ## Project layout
 
@@ -138,15 +141,12 @@ roughly 0.5 MB/s in pure Python.
 
 ## Roadmap
 
-Ideas for extending the project beyond the assignment:
-
-- KV-cache and batched generation for faster inference
-- Mixed-precision (bfloat16) training, gradient accumulation, and gradient
-  checkpointing
-- Grouped-query attention and Flash Attention via
-  `torch.nn.functional.scaled_dot_product_attention`
+- Batched generation plus `torch.compile`/CUDA graphs — the 22M model at batch 1
+  is CPU-dispatch-bound, so these are needed to expose the KV-cache compute win
+- Mixed-precision (bfloat16) training, gradient accumulation, gradient checkpointing
+- Grouped-query attention
 - Streaming dataloader and resume-from-checkpoint training
-- Perplexity evaluation plus a small benchmark harness
+- LLM-as-judge generation scoring and a broader benchmark harness
 - Weights & Biases logging and a demo UI
 
 ## License

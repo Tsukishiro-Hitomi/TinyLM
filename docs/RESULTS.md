@@ -93,6 +93,55 @@ positional structure to fit TinyStories.
 Web text is markedly harder than TinyStories, as expected from the higher
 entropy and much larger vocabulary.
 
+## Evaluation beyond loss
+
+Perplexity depends on the tokenizer's vocabulary size, so it is **not comparable
+across tokenizers**. Bits-per-byte (BPB) divides the negative log-likelihood by
+the number of UTF-8 bytes in the targets and is tokenizer-independent.
+
+| Model | Data | Vocab | Val loss | PPL | **BPB** |
+| --- | --- | ---: | ---: | ---: | ---: |
+| TinyStories | TinyStories valid | 10k | 1.431 | 4.18 | **0.4996** |
+| OpenWebText | OWT valid | 32k | 3.919 | 50.34 | **1.2929** |
+
+The PPL ratio (4.18 vs 50.34, ≈12×) overstates the gap because the OWT tokenizer
+has a 3.2× larger vocabulary; in bits-per-byte the gap is ≈2.6×, which is the
+honest cross-domain difficulty. Reproduce with `scripts/evaluate.py`.
+
+### Generation quality
+
+`scripts/eval_generation.py` samples 8 prompts × 3 continuations (120 tokens,
+temperature 0.8, top-p 0.9):
+
+| Metric | Value |
+| --- | ---: |
+| distinct-1 | 0.267 |
+| distinct-2 | 0.676 |
+| distinct-3 | 0.881 |
+| repetition-4 | 0.044 |
+| unique samples | 24 / 24 |
+
+Repetition is low and all 24 continuations are unique. Samples are written to
+`docs/generations.jsonl` for optional LLM-as-judge scoring.
+
+## Inference performance
+
+KV cache and Flash Attention (via `F.scaled_dot_product_attention`) are both
+implemented; see `scripts/benchmark_inference.py`.
+
+| Change | Effect |
+| --- | --- |
+| `einops.einsum` → `matmul` in the hot path | ~1.9× generation throughput (151 → 297 tok/s) |
+| SDPA (Flash Attention) vs manual attention | ~1.25× |
+| KV cache vs full-prefix recompute | 1.1–1.2× end-to-end |
+
+The KV cache is algorithmically O(L) instead of O(L²) per step (≈66× fewer FLOPs
+at context 128), but wall-clock is only ~1.1× here because a 22M model at batch 1
+is **CPU-dispatch-bound**: a single forward takes ≈3.2 ms whether it processes 1
+or 128 tokens, so the GPU stays idle (0% utilization) waiting on launches. The
+compute win would surface with a larger model, batching, or kernel fusion
+(`torch.compile` / CUDA graphs).
+
 ## Notes
 
 - PPL is token-level perplexity, `exp(val_loss)` on the fixed validation split.

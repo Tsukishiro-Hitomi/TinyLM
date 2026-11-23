@@ -18,8 +18,8 @@ from .model import (
     SwiGLU,
     TransformerBlock,
     TransformerLM,
-    infer,
-    predict,
+    generate,
+    sample_next_token,
     scaled_dot_product_attention,
     silu,
     softmax,
@@ -65,8 +65,8 @@ __all__ = [
     "TransformerLM",
     "silu",
     # inference
-    "infer",
-    "predict",
+    "generate",
+    "sample_next_token",
     # tokenization
     "NUM_CHUNKS",
     "PAT",

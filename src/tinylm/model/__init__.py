@@ -1,7 +1,7 @@
 """Neural-network architecture and inference components."""
 
 from .attention import MultiheadSelfAttention, RoPE, scaled_dot_product_attention, softmax
-from .inference import infer, predict
+from .inference import generate, sample_next_token
 from .layers import Embedding, Linear, RMSNorm
 from .transformer import SwiGLU, TransformerBlock, TransformerLM, silu
 
@@ -14,8 +14,8 @@ __all__ = [
     "SwiGLU",
     "TransformerBlock",
     "TransformerLM",
-    "infer",
-    "predict",
+    "generate",
+    "sample_next_token",
     "scaled_dot_product_attention",
     "silu",
     "softmax",

@@ -28,6 +28,7 @@ class ModelConfig:
     rope_theta: float = 10_000.0
     max_seq_len: int = 256
     tie_weights: bool = False
+    attn_implementation: str = "sdpa"
 
     def __post_init__(self) -> None:
         if self.d_model % self.num_heads != 0:
@@ -53,6 +54,7 @@ class ModelConfig:
             vocab_size=self.vocab_size,
             num_layers=self.num_layers,
             device=_as_device(device),
+            attn_implementation=self.attn_implementation,
         )
         if self.tie_weights:
             # Share the input embedding and output projection weights.
