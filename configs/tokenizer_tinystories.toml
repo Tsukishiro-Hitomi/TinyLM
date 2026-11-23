@@ -1,0 +1,5 @@
+[tokenizer]
+dataset = "tinystories"
+input_path = "data/TinyStoriesV2-GPT4-train.txt"
+vocab_size = 10000
+output_dir = "artifacts/tokenizer"

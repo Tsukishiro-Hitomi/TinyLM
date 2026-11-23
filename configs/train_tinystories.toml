@@ -1,0 +1,12 @@
+[training]
+dataset = "tinystories"
+device = "auto"
+data_dir = "data"
+runs_dir = "runs"
+lr = 0.0003
+steps = 100
+batch = 8
+run_name = "tinystories_smoke"
+max_seconds = 60.0
+ablation = "none"
+tie_weights = false

@@ -1,0 +1,12 @@
+[generation]
+dataset = "tinystories"
+device = "auto"
+checkpoint = "runs/lr_sweep_0.001_seed336/checkpoint_final"
+vocab_path = "artifacts/tokenizer/tinystories_vocab.pkl"
+merges_path = "artifacts/tokenizer/tinystories_merges.pkl"
+prompt = "Once upon a time"
+output = "runs/generated_tinystories.txt"
+max_new_tokens = 64
+temperature = 0.8
+top_p = 0.9
+seed = 336

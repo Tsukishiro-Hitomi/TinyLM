@@ -1,0 +1,35 @@
+# Python environments and caches
+.venv/
+venv/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.pytest_tmp/
+.ruff_cache/
+.mypy_cache/
+.coverage
+htmlcov/
+.ipynb_checkpoints/
+*.log
+
+# Local editors and operating systems
+.idea/
+.vscode/
+.DS_Store
+Thumbs.db
+
+# Downloaded data and generated model artifacts
+data/
+runs/
+artifacts/
+checkpoints/
+wandb/
+*.bin
+*.pt
+*.pth
+*.ckpt
+
+# Build and packaging outputs
+build/
+dist/
+*.egg-info/

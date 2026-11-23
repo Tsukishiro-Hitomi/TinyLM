@@ -1,0 +1,464 @@
+Problem (unicode1)
+(a): '\x00'
+(b): __repr__(): 对象的特殊方法，如何用字符串表示一个对象（与 __str__() 相比，面向开发者，常用于调试），print() 负责显示字符串
+(c): chr(0) 生成不可见字符 NUL，直接在终端输入 chr(0) 会调用其 repr() 方法使其可见，而调用 print() 方法不会出现任何输出（因为是不可见字符）
+
+Problem (unicode2)
+(a): UTF-8 完全兼容 Unicode，根据不同的 Unicode code point 灵活选择 1/2/3/4 bytes 来表示，UTF-16 对大部分字符都用 2 bytes，UTF-32 都使用 4 bytes；因此对于相同的给定文本， UTF-8 通常情况下的编码字节数更短
+(b): 这里说明 UTF-8 的编码规则：
+
+Unicode 范围              UTF-8 二进制格式
+
+U+0000   ~ U+007F         0xxxxxxx
+
+U+0080   ~ U+07FF         110xxxxx 10xxxxxx
+
+U+0800   ~ U+FFFF         1110xxxx 10xxxxxx 10xxxxxx
+
+U+10000  ~ U+10FFFF       11110xxx 10xxxxxx 10xxxxxx 10xxxxxx
+
+因此不能对单个字节直接调用 decode()，否则有可能会报错，例如以 10 开头的字节没有起始字节。
+报错示例：UnicodeDecodeError: 'utf-8' codec can't decode byte 0xe4 in position 0: unexpected end of data
+(c): 逻辑同 b，可以用 11111111 11111111，第二个字节不以 10 开头
+
+Problem (train_bpe_tinystories)
+(a) 
+    naive version
+    time:                   969.56s; 
+    memory:                 0.063 GB; 
+    the longest token:      b' accomplishment'(15 bytes)
+
+    optimized version
+    time:                   129.97s
+    memory:                 0.120 GB
+    the longest token:      b' accomplishment'(15 bytes)
+
+(b) 
+    naive version
+    vocab initialization:   0.000s
+    pre_tokenization:       191.393s
+    BPE training:           778.162s
+    total:                  969.555s
+
+    optimized vesion    
+    vocab initialization:   0.000s
+    pre_tokenization:       97.409s
+    BPE training:           32.524s
+    total:                  129.934s
+
+    BPE train 模块通过优化，速度加快了 20x
+
+Problem (train_bpe_expts_out)
+(a) the longest token: b'\xc3\x83\xc3\x82\xc3\x83\xc3\x82\xc3\x83\xc3\x82\xc3\x83\xc3\x82\xc3\x83\xc3\x82\xc3\x83\xc3\x82\xc3\x83\xc3\x82\xc3\x83\xc3\x82\xc3\x83\xc3\x82\xc3\x83\xc3\x82\xc3\x83\xc3\x82\xc3\x83\xc3\x82\xc3\x83\xc3\x82\xc3\x83\xc3\x82\xc3\x83\xc3\x82\xc3\x83\xc3\x82' (64 bytes)
+    由于 owt 的 vocab_size 远大于 tinystories，因此会经过更多次 merge，相比于 tinystories （the longest token 是一个完整单词），会形成更长的 token
+(b) 由于训练文本的差异（tinystories 为童话故事，用词简单；owt 来源于更大、更复杂的网页语料），训练得到的 tokenizer 也存在差别
+
+Problem (tokenizer_experiment)
+(a) 
+    using owt_tokenizer to encode owt_samples: 
+
+    total_bytes=29501
+    total_tokens=6299
+    compression ratio=4.68 bytes/token
+    encode_time=0.06
+    encode_ratio=497944.99 bytes/second 
+
+    using tinystories_tokenizer to encode tinystories_samples: 
+
+    total_bytes=7412
+    total_tokens=1786
+    compression ratio=4.15 bytes/token
+    encode_time=0.01
+    encode_ratio=596568.04 bytes/second 
+(b)
+    using tinystories_tokenizer to encode owt_samples: 
+
+    total_bytes=29501
+    total_tokens=9250
+    compression ratio=3.19 bytes/token
+    encode_time=0.05
+    encode_ratio=549119.39 bytes/second
+
+    这个结果是合理的。因为 tinystories_tokenizer 与 owt_tokenizer 相比，会更倾向于保留原本 token，merge 的操作次数较少。因此表现为 compression ratio 较低
+(c)
+    综合以上实验结果，encode_ratio 大约为 500000 b/s (0.06 GB/S)
+    对 825 GB 的 Pile dataset 进行编码，大约需要 13750 s (约 4h)
+    
+(d)
+    uint16 可以表示 [0, 65535]，而 vocab_size 最大为 32000，恰好可以表示，节省磁盘空间
+
+Problem(transformer_accounting)
+(a)
+    vocab_size: 50257
+    context_length: 1024
+    num_layers: 48
+    d_model: 1600
+    num_heads: 25
+    d_ff: 4288
+
+    trainable parameters:
+        embedding: (50257, 1600)
+
+        each transformer block (x48)
+            q: (1600, 1600)
+            k: (1600, 1600)
+            v: (1600, 1600)
+            o: (1600, 1600)
+            rmsnorm: 2 * (1600, )
+            swiglu: 3 * (1600, 4288)
+
+        rmsnorm: 2 * (1600, )
+        final_linear: (1600, 50257)
+
+        TOTAL: 1,640,454,400
+        Memory: each parameter is represented as single-precision floating poing (4B), thus total memory allocated is 
+                6,561,817,600B (6.11 GB)
+(b)
+    number of FLOPS:
+    we denote L as context_length and only consider matrix multiplication:
+
+    embedding: (L, 50257) @ (50257, 1600)   160,822,400 L
+    
+    each transformer block (x48)
+        q: (L, 1600) @ (1600, 1600)
+        k: (L, 1600) @ (1600, 1600)
+        v: (L, 1600) @ (1600, 1600)    15,360,000 L
+
+        attention (q @ k.T @ v): (L, 1600) @ (1600, L) @ (L, 1600)    6,400 L^2
+        o: (L, 1600) @ (1600, 1600)    5,120,000 L
+
+        SiLU:
+            (L, 1600) @ (1600, 4288)
+            (L, 1600) @ (1600, 4288)
+            (L, 4288) @ (4288, 1600)    41,164,800 L
+
+        total: 61,644,800 L + 6400 L^2
+
+    final_linear: (L, 1600) @ (1600, 50257)     160,822,400 L
+
+    TOTAL: 3,280,595,200 L + 307,200 L^2
+
+(c)
+    Attention requires the most FLOPS
+(d)
+    GPT-2 small (num_layers = 12,
+                d_model = 768,
+                num_heads = 12):
+
+    GPT-2-medium (num_layers = 24,
+                d_model = 1024,
+                num_heads = 16):
+
+    GPT-2-large (num_layers = 36,
+                d_model = 1280,
+                num_heads = 20):
+
+| Component | GPT-2 Small | GPT-2 Medium | GPT-2 Large |
+|---|---:|---:|---:|
+| Embedding | 79.047 (21.32%) | 105.397 (11.27%) | 131.746 (6.90%) |
+| QKV Projection | 43.487 (11.73%) | 154.619 (16.53%) | 362.388 (18.98%) |
+| Attention | 38.655 (10.43%) | 103.079 (11.02%) | 193.274 (10.12%) |
+| Output Projection | 14.496 (3.91%) | 51.540 (5.51%) | 120.796 (6.33%) |
+| SwiGLU | 115.964 (31.28%) | 415.538 (44.42%) | 969.388 (50.77%) |
+| Final Linear | 79.047 (21.32%) | 105.397 (11.27%) | 131.746 (6.90%) |
+| **TOTAL** | **370.696 (100%)** | **935.569 (100%)** | **1909.336 (100%)** |
+
+As model size increases, the proportion of FLOPs consumed by SwiGLU and linear projections increases, while the proportion consumed by embedding and final vocabulary projection decreases. This is because the computational cost of transformer blocks grows approximately quadratically with the hidden dimension and linearly with the number of layers, whereas embedding and vocabulary projection costs grow only linearly with the hidden dimension.
+
+(e)
+    GPT-2 XL
+    context_length: 1024 -> 16384 (16x)
+
+    FLOPS: 3,280,595,200 L + 307,200 L^2
+        L = 1024: 3,681,452,032,000
+        L = 16384: 136,212,643,840,000
+        37 times
+| Component | FLOPs (L=1024) | Proportion | FLOPs (L=16384) | Proportion |
+|---|---:|---:|---:|---:|
+| Embedding | 0.165 T | 4.47% | 2.635 T | 1.93% |
+| QKV Projection | 0.755 T | 20.51% | 12.080 T | 8.87% |
+| Attention | 0.322 T | 8.75% | 82.463 T | **60.54%** |
+| Output Projection | 0.252 T | 6.84% | 4.027 T | 2.96% |
+| SwiGLU | 2.023 T | **54.96%** | 32.373 T | 23.77% |
+| Final Linear | 0.165 T | 4.47% | 2.635 T | 1.93% |
+| **TOTAL** | **3.681 T** | **100%** | **136.213 T** | **100%** |
+
+Increasing the context length from 1,024 to 16,384 (16×) increases the total FLOPs for one forward pass from approximately 3.68 TFLOPs to 136.21 TFLOPs, representing a 37.00× increase.
+
+The proportion of FLOPs consumed by attention increases significantly from 8.75% to 60.54%, while the proportion consumed by SwiGLU decreases from 54.96% to 23.77%. This is because attention has quadratic complexity \(O(L^2)\) with respect to sequence length, whereas the other components scale linearly with \(L\). Consequently, attention becomes the dominant computational bottleneck for long-context inference.
+    
+Problem(learning_rate_tuning)
+Experiment Result:
+lr = 1
+24.993797302246094
+24.004039764404297
+23.329906463623047
+22.794235229492188
+22.34062957763672
+21.942777633666992
+21.585914611816406
+21.260801315307617
+20.96118927001953
+20.682640075683594
+
+lr = 10.0
+24.442794799804688
+15.643389701843262
+11.531641006469727
+9.022276878356934
+7.308043956756592
+6.059205532073975
+5.11013650894165
+4.366757392883301
+3.771038293838501
+3.2849931716918945
+
+lr = 100.0
+27.545137405395508
+27.54513168334961
+4.725996494293213
+0.1131037250161171
+1.7479128377567406e-16
+1.9481571671211083e-18
+6.5601309774971e-20
+3.907915445398045e-21
+3.3524621999428467e-22
+3.7249579648760116e-23
+
+lr = 1000.0
+25.218935012817383
+9104.0361328125
+1572410.25
+174913856.0
+14168020992.0
+894164402176.0
+45903477997568.0
+1974963804307456.0
+7.279296115847987e+16
+2.337463039483183e+18
+
+学习率为 1 时：loss 缓慢下降；
+学习率为 10 时：loss 较快速收敛；
+学习率为 100 时：loss 快速收敛后又增加，出现振荡；
+学习率为 1000 时：loss 剧烈振荡；
+
+Problem(adamw_accounting)
+(a) peak memory:
+P = 2VD + L(4D^2 + 2D + 3DF) + 2VD
+M_params = 4P
+M_activations = 4B[L(8TD + 4TF + 2HT^2) + 2TD + 2TV]
+M_grad = 4P
+M_optimizer = 8P 
+
+TOTAL: 16P + 4B[L(8TD + 4TF + 2HT^2) + 2TD + 2TV]
+
+how to compute activation?
+    embedding: (B, T, D) BTD
+    transformer block: 
+        2 * RMSNorm: (B, T, D) 2BTD
+        multihead_self_attention:
+            qkv projection: (B, T, D) 3BTD
+            attention scores: (B, H, T, T) BHT^2
+            softmax: BHT^2
+            weight sum: (B, T, D) BTD
+            output projection: (B, T, D) BTD
+
+            total: 5BTD + 2BHT^2
+        swiglu ffn:
+            XW1: (B, T, F) BTF
+            XW2: (B, T, F) BTF
+            SiLU: (B, T, F) BTF
+            element-wise multiplication: (B, T, F) BTF
+            W3 projection: (B, T, D) BTD
+
+            total: 4BTF + BTD
+        
+        total: 8BTD + 2BHT^2 + 4BTF
+    final rmsnorm: (B, T, D) BTD
+    final linear: (B, T, V) BTV
+    cross entropy: (B, T, V) BTV
+
+(b) GPT-2 XL
+    vocab_size: 50,257
+    context_length: 1,024
+    num_layers: 48
+    d_model: 1,600
+    num_heads: 25
+    d_ff: 4288
+
+M_total = 16.37339136B + 26.2472704 GB <= 80 GB
+max_batchsize = 3
+
+(c) FLOPs:
+F_forward = BT(4VD + 8ND^2 + 6NDF) + 4NBT^2D
+F_backward = 2 * F_forward
+AdamW step: O(P)
+
+(d)
+F_GPU = 495 * 10^12 * 0.5 = 247.5 * 10^12 FLOPS/s
+F_step = 3 F_forward = 1.08035 * 10^16 FLOPS/s 
+t = 40000 * F_step / F_GPU 
+  = 1.74602 * 10^7 s 
+  = 4850.06 h
+
+Problem(experiment_log)
+TinyStories baseline experiment: vocabulary size 10,000; context length 256;
+4 layers, 16 heads, d_model=512, d_ff=1344, RoPE theta=10000; batch size 32;
+40,000 steps (327,680,000 training tokens). AdamW uses peak learning rate
+3e-4, weight decay 0.1, betas (0.9, 0.999), epsilon 1e-8, 2,000 warmup
+steps and cosine decay to 3e-5. GPU: NVIDIA A800 80GB.
+Training time: 3,774.56 seconds. Final logged training loss: 1.4317.
+The training-time validation loss 1.3752 was measured on a single fixed batch.
+An independent evaluation of the final checkpoint on 32 fixed batches of 16
+sequences (131,072 tokens, seed 336) yielded mean validation loss 1.430875.
+The corresponding metrics, step-based loss curve and checkpoint are under
+runs/20261028-080941/. The metrics CSV includes step and wall-clock time.
+
+Problem(learning_rate)
+We swept peak learning rates logarithmically, using seed 336, batch size 32,
+40,000 steps, 2,000 warmup steps, cosine decay to 10% of peak LR, and a fixed
+validation sample of 8 batches of 16 sequences (32,768 tokens). The final
+per-token validation losses were: 1e-4: 1.5982; 1e-3: 1.3778; 3e-3: 1.3843;
+1e-2: 1.4857; 3e-2: 1.8658; 1e-1: 2.1318. These runs completed without
+numerical divergence; among them 1e-3 produced the lowest measured final loss.
+The original 3e-4 baseline was evaluated separately on 131,072 tokens and
+obtained 1.430875; its training-time validation used a different fixed batch.
+Each sweep's full curve and conditions are in runs/lr_sweep_<LR>_seed336/;
+comparison plots are in runs/learning_rate_comparison/. Additional higher-LR
+runs investigated the requested divergence boundary.
+Peak LR 0.3 exceeded the predeclared loss threshold of 100 at step 1,107
+(training loss 105.7918) and was stopped as divergent; its curve through
+step 1,000 is retained in runs/lr_sweep_0.3_seed336/. Thus the divergence
+threshold in this sweep lies above 0.1 and no higher than 0.3 in peak LR;
+0.001 gave the best final loss among the completed finite runs, far below
+that threshold. The changing learning rate and coarse search limit this
+conclusion: this is not a precise estimate of a constant-LR stability edge.
+The best observed checkpoint (peak LR 0.001) was independently evaluated on
+131,072 validation tokens using seed 336, giving loss 1.364318, below 1.45.
+Peak LR 1.0 also exceeded the loss-100 divergence threshold at step 523
+(loss 121.5833); its logged curve is runs/lr_sweep_1_seed336/metrics.csv.
+
+Problem(batch_size_experiment)
+For an initial equal-token comparison, we trained from seed 336 using peak
+LR 0.001, 5% warmup and cosine decay to 0.0001, and approximately 10.24M
+tokens per run. Fixed validation uses 32,768 tokens. Batch size, steps,
+final validation loss, and wall-clock seconds respectively were:
+1: 40000, 2.0214, 896.76s; 8: 5000, 1.9742, 152.06s;
+32: 1250, 2.0708, 121.43s; 64: 625, 2.2267, 117.29s;
+128: 313, 2.5189, 112.25s (10,256,384 tokens).
+At this short, fixed-token budget, larger batches used the GPU more efficiently
+but performed fewer optimizer updates and had higher final validation loss;
+batch 8 achieved the lowest loss of these settings. The same peak LR was used
+for all settings, so this is not a fully LR-retuned comparison. Learning-curve CSVs are
+under runs/batch_<size>_seed336/metrics.csv and include wall-clock times.
+Additional equal-token runs: batch 256, 157 steps, validation loss 2.9619,
+112.82s; batch 512, 79 steps, loss 3.4811, 110.98s. Batch 1024 ran out of
+memory on the first forward pass on the A800 80GB. Thus 512 worked and 1024
+did not; the exact maximum between them was not determined. The larger runs
+processed 10,289,152 and 10,354,688 tokens respectively due to rounding.
+Additional attempts at batch 768 and 640 each ran out of GPU memory during
+the first backward pass. Thus 512 is the largest tested working batch and
+the exact maximum is between 512 and 640, subject to allocator and device state.
+Comparison plots against token count and wall time are in
+runs/batch_size_comparison/validation_vs_tokens.png and validation_vs_time.png.
+
+Problem(generate)
+Checkpoint: peak LR 0.001, step 40000; seed 336, temperature 0.8, top-p 0.9,
+prompt "Once upon a time". The sample reached <|endoftext|> after 168 generated
+tokens (the assignment permits stopping at the first end token):
+
+Once upon a time, there was a little girl named Lily. She had a pretty, delicate toy frog. Lily loved her frog very much. One day, she went to play outside. The sun was shining, and the grass was green.
+Lily saw a small bug on the grass. The bug was tiny and tiny. Lily thought the bug looked like a bug. She wanted to be friends with the bug. She reached out her hand and the bug tried to pinch her hand. But the bug pinched her finger. Lily cried.
+A kind boy saw Lily crying. He knew she was sorry. He took Lily to his house. He gave her a bath and cleaned her finger. Lily felt better. She learned not to pinch her delicate toy frog. From that day on, Lily was kind to her friends and they all played together.
+<|endoftext|>
+
+The sample is grammatical and resembles a children's story, but repeats
+phrases and loses causal coherence (the moral concerns the frog rather than
+the bug). Model quality and decoding temperature/top-p affect fluency and
+diversity; the prompt and random seed also affect the resulting sample.
+
+Problem(layer_norm_ablation)
+Removing all block RMSNorms and the final RMSNorm at peak LR 0.001 led to
+training divergence at step 8,883 (loss 10,931.7; run terminated after loss
+exceeded 100). The last recorded validation loss was 1.8497 at step 8,500.
+The baseline's pre-norm curve is in runs/lr_sweep_0.001_seed336/metrics.csv;
+the no-norm curve is in runs/ablation_no_norm_seed336/metrics.csv. A lower-LR
+no-norm run was performed to determine whether it improves stability.
+At peak LR 0.0001 the no-norm run completed 40,000 steps without crossing
+the divergence threshold, with final validation loss 1.67028. Lowering the
+rate therefore stabilized this run, but it underperformed the peak-0.001
+pre-norm baseline (1.37778). The runs use the same seed and validation set;
+curves are in runs/ablation_comparison/normalization.png.
+
+Problem(pre_norm_ablation)
+With the same seed 336, 40,000 steps, 32,768 fixed validation tokens and
+peak LR 0.001, post-norm reached validation loss 1.37844 versus 1.37778 for
+the pre-norm baseline. Under this configuration the final losses were nearly
+identical; this observation alone does not establish general equivalence.
+Curves: runs/ablation_comparison/normalization.png and the underlying CSVs.
+
+Problem(no_pos_emb)
+Removing RoPE with otherwise identical settings resulted in final validation
+loss 1.42989 versus 1.37778 with RoPE. The NoPE model trained successfully,
+but was worse by 0.0521 loss on this fixed validation sample. Curves:
+runs/ablation_comparison/position.png and the underlying metrics CSVs.
+
+Problem(swiglu_ablation)
+Replacing SwiGLU (d_ff=1344, three weight matrices) with a SiLU FFN
+(d_ff=2048, two weight matrices) approximately matches parameter count.
+At peak LR 0.001, seed 336 and 40,000 steps, SiLU final validation loss
+was 1.38683 versus 1.37778 for SwiGLU on the same 32,768 validation tokens.
+Here SwiGLU is slightly better (difference 0.00905); one seed and one
+learning rate do not establish that the difference generalizes. Curves and
+metrics: runs/ablation_comparison/activation.png and
+runs/ablation_silu_seed336/metrics.csv.
+
+Problem(main_experiment)
+OpenWebText: vocabulary 32,000, context 256, 4 layers, 16 heads, d_model
+512, d_ff 1344, batch size 32, 40,000 steps (327,680,000 tokens), seed 336,
+AdamW peak LR 0.001 with 2,000 warmup steps and cosine decay to 0.0001.
+Final training loss 3.97156, final fixed 32,768-token validation loss 3.93880,
+and independent fixed 131,072-token validation loss 3.91874. Training time
+was 5,364.59 seconds on A800. Learning curves and metrics are in
+runs/owt_comparison/ and runs/owt_baseline_seed336/metrics.csv.
+The TinyStories peak-0.001 model had validation loss 1.36432 on 131,072
+tokens. OpenWebText is more varied and complex, and the datasets use different
+tokenizers, so these per-token losses are not directly comparable as a pure
+measure of difficulty or bits per byte.
+
+Generated sample (checkpoint step 40000, seed 336, temperature 0.8,
+top-p 0.9; 256 tokens; prompt "The researchers discovered that"):
+The researchers discovered that a number of Spanish-language cannabis plants, particularly Brazil, were killed, and in the human system in the lab, were among the many, many in Brazil, who had fled the country.
+
+Tel Aviv University, in the lab, is the largest international cannabis plant in the world. In 2010, it was surpassed in the world, according to the American Institute for Medical Cannabis Research. The scientists used cannabis plants and plants as much as possible to establish the drug in the home.
+
+“They’re a very small group of people who are using cannabis for cannabis,” said James Brie, a professor of neuroscience at the University of San Francisco. “They’re like, ‘They’re like drugs, it’s a great place to go.’”
+
+Tel Aviv University, whose study was published in the U.S., is one of the most widely known strains of cannabis in the world, has grown into a very small number of cannabis plants. And the most promising strains have been tested in the United States for the same type of cannabis.
+
+“This was a very small region, very large. It was a very small region, very large that it had a lot of medical cannabis in the hands of people. It was
+
+The sample imitates article structure but repeats phrases and makes incoherent
+or invented claims. OpenWebText covers more subjects and styles than stories,
+so the same small model and token budget must model a broader distribution.
+The text is a generated example, not evidence for any factual claim.
+The OpenWebText tokenizer was trained from scratch; encoding used its learned
+vocabulary/merges through tiktoken after comparing the first 2,000 lines per
+split with the custom encoder and matching the first 32 MiB of token output.
+
+Problem(leaderboard) (local A800 experiment; not a B200 leaderboard submission)
+Modification: tie input embeddings and output projection weights, initializing
+the shared embedding with truncated normal std 0.02. All training data is the
+provided OpenWebText training set. Model settings and seed match the baseline;
+peak LR 0.001, 2,000 warmup steps, and a 40,000-step cosine schedule. The
+run stopped at step 20,004 after 2,640.22 seconds (44.00 minutes) on one A800.
+Final fixed 32,768-token validation loss was 4.08463; independent validation
+on 131,072 tokens yielded 4.06623. The original untied baseline's latest
+measurement before 2,640 seconds was 4.20207 at step 19,500 and 2,632.35s,
+on the same fixed 32,768-token sample. Thus this single tied run improved
+measured loss by about 0.117 over that wall-clock reference; initialization
+and reached step differ too, so the gain cannot be attributed solely to tying.
+The curves are runs/owt_comparison/validation_vs_wall_time_s.png and
+validation_vs_step.png; the checkpoint and metrics are in
+runs/owt_tied_seed336/. This is an A800 result, not a verified 45-minute B200
+run, and has not been submitted to the leaderboard.
